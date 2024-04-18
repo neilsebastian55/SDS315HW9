@@ -1,0 +1,203 @@
+---
+title: "SDS315_HW9"
+author: "Neil Sebastian"
+date: "2024-04-16"
+output: html_document
+---
+```{r global_options, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, error=FALSE, message=FALSE}
+library(tidyverse)
+library(dplyr)
+library(mosaic)
+library(knitr)
+library(boot)
+library(MatchIt)
+```
+# **HW9**
+### **UT EID: ns36965**
+### **[GitHub Link](https://github.com/neilsebastian55/SDS315HW9)**
+
+## **Problem 1: Get out the vote**
+
+```{r echo = FALSE, error = FALSE, message = FALSE}
+turnout = read.csv("turnout.csv")
+```
+
+### **Part A**
+##### **How much more likely are GOTV call recipients to have voted in 1998? As a preliminary analysis, calculate the following quantities.**
+##### **• The proportion of those receiving a GOTV call who voted in 1998.**
+##### **• The sample proportion of those not receiving a GOTV call who voted in 1998.**
+##### **• A large-sample 95% confidence interval for the difference in these two proportions: that is, the proportions of voting in 1998 (voted1998==1) for those who received a GOTV call versus those who didn’t.**
+
+``` {r echo=FALSE, message=FALSE}
+
+call_prop = round(count(turnout$GOTV_call[turnout$voted1998 == 1 & turnout$GOTV_call == 1])/count(turnout$GOTV_call == 1),3)
+no_call_prop = round(count(turnout$GOTV_call[turnout$voted1998 == 1 & turnout$GOTV_call == 0])/count(turnout$GOTV_call == 0),3)
+
+call_prop
+no_call_prop
+
+```
+
+The numbers above represent that the proportion of those who recieved a call and then voted is about 65%. Whereas those who did not recieve a call and voted was about 45%.
+
+Next using bootstrapping we have calculated the difference in proportions on a 95% confidence interval.
+``` {r echo=FALSE, message=FALSE}
+# Create bootstrap samples and calculate differences in proportions
+bootstrap_results <- replicate(1000, {
+ 
+  sample_data = turnout[sample(nrow(turnout), replace = TRUE), ]
+ 
+ call_prop_boot = count(turnout$GOTV_call[turnout$voted1998 == 1 & turnout$GOTV_call == 1])/count(turnout$GOTV_call == 1)
+ no_call_prop_boot = count(turnout$GOTV_call[turnout$voted1998 == 1 & turnout$GOTV_call == 0])/count(turnout$GOTV_call == 0)
+ 
+  prop_diff = call_prop_boot - no_call_prop_boot
+  return(prop_diff)
+})
+
+ci <- quantile(bootstrap_results, c(0.05, 0.95))
+
+cat(sprintf("Estimate for the Difference in Proportions: %.4f - %.4f\n", ci[1], ci[2]))
+```
+
+
+### **Part B**
+##### **Part B. Consider the voted1996, AGE, and MAJORPTY variables. Provide evidence that at all three of these variables are confounders that prevent the difference you observed in Part A from representing the true causal effect of the GOTV call on the likelihood that a person voted in 1998. Confounders here would be factors that make someone more likely to receive a GOTV call and to have voted in 1998. Your evidence here can consist of any appropriate plot, table, or set of summary statistics.**
+```{r echo = FALSE, error = FALSE, message = FALSE}
+# Create a new column named 'call_and_voted_1998'
+turnout$call_and_voted_1998 <- as.numeric(turnout$GOTV_call == 1 & turnout$voted1998== 1)
+
+#Prove confounders for 1996
+#Stratify the data based on voting in 1996
+stratified_voting_1996_results = turnout %>%
+  group_by(voted1996) %>%
+  summarise(proportion_voted_1998 = mean(call_and_voted_1998 == "1"))
+
+#View
+print(stratified_voting_1996_results)
+print("Based on these results we can see that people who voted in 1996 also voted in 1998 at a higher proportion than those who did not vote in 1996 but voted in 1998.")
+
+#Prove confounders for Age 
+# Create histogram for people who got GOTV calls
+ggplot(data = turnout[turnout$call_and_voted_1998 == 1, ], aes(x = AGE)) +
+  geom_histogram(fill = "blue", alpha = 0.5, bins = 30) +
+  labs(title = "Distribution of Age for People Who Received GOTV Calls & Voted",
+       x = "Age",
+       y = "Count", caption="Based on this distribution, it appears that the that as age increased people were recieiving calls and voteing more\n. This is because the distribution is left skewed, meaning the median will be a higher age.") + theme(plot.caption = element_text(hjust = 0))
+
+# Distribution of MAJORPTY among GOTV call and no GOTV call groups
+ggplot(turnout, aes(x = factor(MAJORPTY), fill = factor(call_and_voted_1998))) +
+  geom_bar(position = "dodge") +
+  labs(title = "GOTV Call and Voted in 1998 by Major Party Affiliation",
+       x = "Major Party Affiliation",
+       y = "Count",
+       fill = "Got Call and Voted in 1998", caption="Based on this distribution, it appears that the that people with a certain political party affiliation were recieving calls at a higher number\n. This is a confounder because it affects the number of those who will go and vote based on calls.") + theme(plot.caption = element_text(hjust = 0))
+
+
+```
+
+
+### **Part C**
+#####
+``` {r echo=FALSE, message=FALSE}
+
+turnout_match = matchit(GOTV_call ~ voted1996 + AGE + MAJORPTY, data = turnout, ratio=5)
+summary(turnout_match)
+turnout_matched = match.data(turnout_match)
+
+```
+
+The summary above proves that the matching was effective because the differences between the means of the previously confounding variables are now approximately the same. This means that the matching was effective, and the variables have been balanced.
+
+``` {r echo=FALSE, message=FALSE}
+
+matched_call_prop =
+  count(turnout_matched$GOTV_call[turnout_matched$voted1998 == 1 & turnout_matched$GOTV_call == 1])/count(turnout_matched$GOTV_call==1)
+
+matched_no_call_prop =
+  count(turnout_matched$GOTV_call[turnout_matched$voted1998 == 1 & turnout_matched$GOTV_call == 0])/count(turnout_matched$GOTV_call==0)
+
+matched_call_prop
+matched_no_call_prop
+
+# Create bootstrap samples and calculate differences in proportions
+bootstrap_results = replicate(1000, {
+ 
+  sample_data = turnout_matched[sample(nrow(turnout_matched), replace = TRUE), ]
+ 
+  matched_call_prop_boot =
+  count(turnout_matched$GOTV_call[turnout_matched$voted1998 == 1 & turnout_matched$GOTV_call == 1])/count(turnout_matched$GOTV_call==1)
+
+  matched_no_call_prop_boot =
+  count(turnout_matched$GOTV_call[turnout_matched$voted1998 == 1 & turnout_matched$GOTV_call == 0])/count(turnout_matched$GOTV_call==0)
+
+  prop_diff = matched_call_prop_boot - matched_no_call_prop_boot
+  return(prop_diff)
+})
+
+ci = quantile(bootstrap_results, c(0.025, 0.975))
+
+cat(sprintf("Estimate for the Difference in Matched Proportions: %.4f - %.4f\n", ci[1], ci[2]))
+
+```
+
+Based on the data, it appears that the GOTV call did indeed play a role in boosting voter turnout during the 1998 election. However, it's important to note that the significant difference in voter turnout initially observed was largely influenced by other factors, such as age, party affiliation, and past participation in elections, which were accounted for through matching. The initial estimate suggested a difference of 20.35% between those who received the call and those who didn't. However, after accounting for confounding variables through matching, the difference attributable solely to the GOTV call reduced to around 7.37%. This indicates that while the GOTV call was effective, its impact was influenced by the other factors.
+
+## **Problem 2: Manufacturing flaws in circuit boards**
+
+```{r echo = FALSE, error = FALSE, message = FALSE}
+solder = read.csv("solder.csv")
+```
+
+### **Part A:**
+##### **Make two plots. The first plot should provide evidence that the size of the opening on the solder gun is related to the number of skips. The second should provide evidence that the thickness of the alloy used for soldering is related to the number of skips. Give each plot an informative caption describing what is shown in the plot.**
+
+```{r echo = FALSE, error = FALSE, message = FALSE}
+ggplot(solder) + geom_boxplot(aes(skips, Opening), fill = "lightpink") + labs(title = "Number of Skips by Opening Sizes", x="Number of Skips", y="Opening Size", caption="Based on this distribution, it seems that the size of the opening may have a negative impact on the number of skips\n, as a larger opening tends to decrease the number of skips.") + theme(plot.caption = element_text(hjust = 0))
+
+
+
+ggplot(solder) + geom_boxplot(aes(skips, Solder), fill = "skyblue") + labs(title = "Number of Skips by Solder Thickness", x="Number of Skips", y="Solder Thickness", caption="Based on this distribution, it seems that the solder thickness may have a negative effect on the number of skips, where\na thicker solder reduces the number of skips") + theme(plot.caption = element_text(hjust = 0))
+
+
+
+
+
+```
+
+### **Part B**
+##### **Consider the voted1996, AGE, and MAJORPTY variables. Provide evidence that at all three of these variables are confounders that prevent the difference you observed in Part A from representing the true causal effect of the GOTV call on the likelihood that a person voted in 1998. Confounders here would be factors that make someone more likely to receive a GOTV call and to have voted in 1998. Your evidence here can consist of any appropriate plot, table, or set of summary statistics.**
+``` {r echo=FALSE}
+
+solder_boot = do(10000) * lm(skips ~ Solder + Opening + Solder:Opening, data=resample(solder))
+solder_boot_conf = confint(solder_boot)
+
+solder_boot_data = as.data.frame(solder_boot_conf)
+solder_boot_data$name = c("Thick + L (Intercept)", "Thin + L", "Thick + M", "Thick + S", "Thin + M", "Thin + S", "Sigma", "R^2", "F")
+solder_boot_data
+
+```
+
+### **Part C**
+##### **Interpret each estimated coefficient in your model in no more than 1-2 sentences. A good template here is provided in the course packet, when we fit a model for the video games data that had an interaction in it and interpreted each coefficient in a sentence or two.**
+
+- When soldering is Thick and the opening is Large, there is an estimated rate of change of .39 skips.
+
+- When soldering is Thin and the opening Large, there is an estimated 2.28 MORE skips as compared to the intercept of .39 skips. This indicates a change of +2.67 skips in this case.
+
+- When soldering is Thick and the opening Medium, there is an estimated 2.41 MORE skips as compared to the intercept of .39 skips. This indicates a change of +2.80 skips in this case.
+
+- When soldering is Thick and the opening Small, there is an estimated 5.13 MORE skips as compared to the intercept of .39 skips. This indicates a change of +5.52 skips in this case.
+
+- When soldering is Thin and the opening Medium, there is an estimated 0.74 LESS skips as compared to the intercept of .39 skips. This indicates a change of -.35 skips in this case.
+
+- When soldering is Thin and the opening Small, there is an estimated 9.65 MORE skips as compared to the intercept of .39 skips. This indicates a change of +10.04 skips in this case.
+
+### *Part D*
+##### **If you had to recommend a combination of Opening size and Solder thickness to AT&T based on this analysis, which one would it be, and why? (Remember, the goal is to minimize the number of skips in the manufacturing process.)**
+
+With the goal in mind to minimize skips in the manufacturing proccess, it would be most effective to use a thin solder with a medium opening. This is because it is the only case where there is an estimated LESS skips compared to the intercept (.74 skips less). Because it has this negative effect it is likely that you will minimize skips in the manufacturing proccess.
+
